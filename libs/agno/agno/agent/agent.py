@@ -89,7 +89,7 @@ from agno.utils.response import (
 from agno.utils.safe_formatter import SafeFormatter
 from agno.utils.string import parse_response_model_str
 from agno.utils.timer import Timer
-
+from agno.file.file_store import FileStore
 
 @dataclass(init=False)
 class Agent:
@@ -330,6 +330,7 @@ class Agent:
     # telemetry=True logs minimal telemetry for analytics
     # This helps us improve the Agent and provide better support
     telemetry: bool = True
+    filestore: Optional[FileStore] = None
 
     def __init__(
         self,
@@ -421,6 +422,7 @@ class Agent:
         debug_level: Literal[1, 2] = 1,
         monitoring: bool = False,
         telemetry: bool = True,
+        filestore: Optional[FileStore] = None,
     ):
         self.model = model
         self.name = name
@@ -535,6 +537,7 @@ class Agent:
         self.debug_level = debug_level
         self.monitoring = monitoring
         self.telemetry = telemetry
+        self.filestore = filestore
 
         # --- Params not to be set by user ---
         self.session_metrics: Optional[SessionMetrics] = None
