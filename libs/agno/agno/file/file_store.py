@@ -1,5 +1,6 @@
 import uuid
 
+
 class FileStore:
     def __init__(self):
         self._files = {}  # key: file_id, value: dict with content, name, content_type
