@@ -22,6 +22,7 @@ class AgentModel(BaseModel):
 class AgentGetResponse(BaseModel):
     agent_id: Optional[str] = None
     name: Optional[str] = None
+    category: Optional[str] = None
     model: Optional[AgentModel] = None
     add_context: Optional[bool] = None
     tools: Optional[List[Dict[str, Any]]] = None
@@ -56,6 +57,7 @@ class AgentGetResponse(BaseModel):
         return AgentGetResponse(
             agent_id=agent.agent_id,
             name=agent.name,
+            category=agent.category,
             model=AgentModel(
                 name=agent.model.name or agent.model.__class__.__name__ if agent.model else None,
                 model=agent.model.id if agent.model else None,

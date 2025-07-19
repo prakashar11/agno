@@ -225,6 +225,7 @@ def get_async_playground_router(
                 AgentGetResponse(
                     agent_id=agent.agent_id,
                     name=agent.name,
+                    category=agent.category,
                     model=AgentModel(
                         name=name,
                         model=model_id,
