@@ -105,6 +105,8 @@ class Agent:
     agent_id: Optional[str] = None
     # Agent category for hierarchical organization (e.g., "Security", "Analysis", "Automation")
     category: Optional[str] = None
+    # Agent tip/tooltip for displaying helpful information to users in the UI
+    agent_tip: Optional[str] = None
     # Agent introduction. This is added to the message history when a run is started.
     introduction: Optional[str] = None
 
@@ -344,6 +346,7 @@ class Agent:
         name: Optional[str] = None,
         agent_id: Optional[str] = None,
         category: Optional[str] = None,
+        agent_tip: Optional[str] = None,
         introduction: Optional[str] = None,
         user_id: Optional[str] = None,
         session_id: Optional[str] = None,
@@ -434,6 +437,7 @@ class Agent:
         self.name = name
         self.agent_id = agent_id
         self.category = category
+        self.agent_tip = agent_tip
         self.introduction = introduction
         self.user_id = user_id
 
