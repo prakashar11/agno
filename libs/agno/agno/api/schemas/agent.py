@@ -28,4 +28,5 @@ class AgentCreate(BaseModel):
     app_id: Optional[str] = None
     workflow_id: Optional[str] = None
     name: Optional[str] = None
+    category: Optional[str] = None
     config: Dict[str, Any]
