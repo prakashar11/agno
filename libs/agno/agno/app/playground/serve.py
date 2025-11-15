@@ -23,16 +23,25 @@ def serve_playground_app(
 ):
     import uvicorn
 
-    try:
-        create_playground_endpoint(
-            playground=PlaygroundEndpointCreate(
-                endpoint=f"{scheme}://{host}:{port}", playground_data={"prefix": prefix}
-            ),
-        )
-    except Exception as e:
-        logger.error(f"Could not create playground endpoint: {e}")
-        logger.error("Please try again.")
-        return
+    # Skip external API call for localhost/local deployments
+    # This prevents unnecessary network calls to api.agno.com during local development
+    is_localhost = host in ("localhost", "127.0.0.1", "0.0.0.0", "::1")
+    
+    if not is_localhost:
+        # Only register endpoint with agno.com for non-localhost deployments
+        try:
+            logger.info("Registering playground endpoint with api.agno.com")
+            create_playground_endpoint(
+                playground=PlaygroundEndpointCreate(
+                    endpoint=f"{scheme}://{host}:{port}", playground_data={"prefix": prefix}
+                ),
+            )
+        except Exception as e:
+            logger.error(f"Could not create playground endpoint: {e}")
+            logger.error("Please try again.")
+            return
+    else:
+        logger.info(f"Skipping endpoint registration for localhost deployment ({host})")
 
     logger.info(f"Starting playground on {scheme}://{host}:{port}")
     # Encode the full endpoint (host:port)
