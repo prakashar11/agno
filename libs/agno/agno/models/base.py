@@ -1624,14 +1624,15 @@ class Model(ABC):
                     yield ModelResponse(content=function_call_output)
 
             # For generator tools with show_result=True, we've already streamed incremental results
-            # So we create a summary for the agent's context instead of the full result
+            # So we create a minimal context message (no summary) to avoid triggering agent summary generation
             was_generator = isinstance(fc.result, (AsyncGeneratorType, collections.abc.AsyncIterator))
             if was_generator and fc.function.show_result and len(function_call_output) > 500:
-                # Create summary for agent context (full content already streamed to agent-ui)
+                # Create minimal context for agent (full content already streamed to agent-ui)
+                # No summary included to prevent agent from generating additional summaries
                 context_output = (
-                    f"Tool '{fc.function.name}' completed. "
-                    f"Content streamed incrementally ({len(function_call_output)} chars total). "
-                    f"Summary: {function_call_output[:200]}... [truncated]"
+                    f"Tool '{fc.function.name}' completed successfully. "
+                    f"Content was streamed incrementally to the user ({len(function_call_output)} characters total). "
+                    f"The user has already seen all the detailed results."
                 )
             else:
                 context_output = function_call_output
@@ -1641,15 +1642,18 @@ class Model(ABC):
                 fc, success=function_call_success, output=context_output, timer=function_call_timer
             )
             
-            # For the final ToolCallCompleted event, use summary for generator tools
+            # For generator tools with show_result=True, we've already streamed all incremental results
+            # So we send a minimal final event (no result content) to avoid duplicate summary
             if was_generator and fc.function.show_result:
-                # Send summary instead of full result (full content already streamed incrementally)
-                final_result = f"Tool completed. {len(function_call_output)} characters streamed incrementally above."
+                # Send minimal completion event without result (all content already streamed incrementally)
+                final_result = None  # No result needed - already streamed
+                final_content = ""  # Empty content to avoid showing summary
             else:
                 final_result = str(function_call_result.content)
+                final_content = f"{fc.get_call_str()} completed in {function_call_timer.elapsed:.4f}s."
             
             yield ModelResponse(
-                content=f"{fc.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
+                content=final_content,
                 tool_executions=[
                     ToolExecution(
                         tool_call_id=function_call_result.tool_call_id,
@@ -1664,7 +1668,7 @@ class Model(ABC):
                 event=ModelResponseEvent.tool_call_completed.value,
             )
 
-            # Add function call result to function call results (with summary for generator tools)
+            # Add function call result to function call results (with minimal context for generator tools)
             function_call_results.append(function_call_result)
 
         # Add any additional messages at the end
