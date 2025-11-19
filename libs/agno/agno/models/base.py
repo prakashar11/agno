@@ -1603,16 +1603,51 @@ class Model(ABC):
                     else:
                         function_call_output += str(item)
                         if fc.function.show_result:
-                            yield ModelResponse(content=str(item))
+                            # Yield incremental ToolCallCompleted event with accumulated result so far
+                            # This allows streaming of tool results to agent-ui
+                            yield ModelResponse(
+                                content=str(item),
+                                tool_executions=[
+                                    ToolExecution(
+                                        tool_call_id=fc.call_id,
+                                        tool_name=fc.function.name,
+                                        tool_args=fc.arguments,
+                                        result=function_call_output,  # Accumulated result so far
+                                        tool_call_error=False,
+                                    )
+                                ],
+                                event=ModelResponseEvent.tool_call_completed.value,
+                            )
             else:
                 function_call_output = str(fc.result)
                 if fc.function.show_result:
                     yield ModelResponse(content=function_call_output)
 
+            # For generator tools with show_result=True, we've already streamed incremental results
+            # So we create a summary for the agent's context instead of the full result
+            was_generator = isinstance(fc.result, (AsyncGeneratorType, collections.abc.AsyncIterator))
+            if was_generator and fc.function.show_result and len(function_call_output) > 500:
+                # Create summary for agent context (full content already streamed to agent-ui)
+                context_output = (
+                    f"Tool '{fc.function.name}' completed. "
+                    f"Content streamed incrementally ({len(function_call_output)} chars total). "
+                    f"Summary: {function_call_output[:200]}... [truncated]"
+                )
+            else:
+                context_output = function_call_output
+            
             # Create and yield function call result
             function_call_result = self.create_function_call_result(
-                fc, success=function_call_success, output=function_call_output, timer=function_call_timer
+                fc, success=function_call_success, output=context_output, timer=function_call_timer
             )
+            
+            # For the final ToolCallCompleted event, use summary for generator tools
+            if was_generator and fc.function.show_result:
+                # Send summary instead of full result (full content already streamed incrementally)
+                final_result = f"Tool completed. {len(function_call_output)} characters streamed incrementally above."
+            else:
+                final_result = str(function_call_result.content)
+            
             yield ModelResponse(
                 content=f"{fc.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
                 tool_executions=[
@@ -1621,7 +1656,7 @@ class Model(ABC):
                         tool_name=function_call_result.tool_name,
                         tool_args=function_call_result.tool_args,
                         tool_call_error=function_call_result.tool_call_error,
-                        result=str(function_call_result.content),
+                        result=final_result,
                         stop_after_tool_call=function_call_result.stop_after_tool_call,
                         metrics=function_call_result.metrics,
                     )
@@ -1629,7 +1664,7 @@ class Model(ABC):
                 event=ModelResponseEvent.tool_call_completed.value,
             )
 
-            # Add function call result to function call results
+            # Add function call result to function call results (with summary for generator tools)
             function_call_results.append(function_call_result)
 
         # Add any additional messages at the end
