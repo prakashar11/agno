@@ -1628,11 +1628,11 @@ class Model(ABC):
             was_generator = isinstance(fc.result, (AsyncGeneratorType, collections.abc.AsyncIterator))
             if was_generator and fc.function.show_result and len(function_call_output) > 500:
                 # Create minimal context for agent (full content already streamed to agent-ui)
-                # No summary included to prevent agent from generating additional summaries
+                # Explicitly instruct agent NOT to summarize - user has already seen all results
                 context_output = (
                     f"Tool '{fc.function.name}' completed successfully. "
-                    f"Content was streamed incrementally to the user ({len(function_call_output)} characters total). "
-                    f"The user has already seen all the detailed results."
+                    f"All results ({len(function_call_output)} characters) were already streamed and displayed to the user. "
+                    f"DO NOT generate a summary or repeat the results - the user has already seen everything."
                 )
             else:
                 context_output = function_call_output
