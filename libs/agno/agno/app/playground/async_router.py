@@ -36,8 +36,10 @@ from agno.media import Audio, Image, Video
 from agno.media import File as FileMedia
 from agno.memory.agent import AgentMemory
 from agno.memory.v2 import Memory
+from agno.exceptions import RunCancelledException
 from agno.run.response import RunResponseErrorEvent, RunResponseEvent
 from agno.run.team import RunResponseErrorEvent as TeamRunResponseErrorEvent
+from agno.utils.events import create_run_response_cancelled_event
 from agno.storage.session.agent import AgentSession
 from agno.storage.session.team import TeamSession
 from agno.storage.session.workflow import WorkflowSession
@@ -70,6 +72,44 @@ async def chat_response_streamer(
         )
         async for run_response_chunk in run_response:
             yield run_response_chunk.to_json()
+    except (RunCancelledException, KeyboardInterrupt, SystemExit, asyncio.CancelledError) as e:
+        # Handle cancellation/interruption gracefully - preserve existing results
+        # This covers various cancellation scenarios:
+        # - RunCancelledException: explicit cancellation
+        # - KeyboardInterrupt: Ctrl-C or SIGINT
+        # - SystemExit: system shutdown signal
+        # - asyncio.CancelledError: async task cancellation
+        # Create a cancellation event but don't treat it as an error
+        # Use agent.run_response if available, otherwise create a minimal one
+        cancellation_reason = "Operation cancelled"
+        if isinstance(e, RunCancelledException):
+            cancellation_reason = str(e) or "Operation cancelled by user"
+        elif isinstance(e, KeyboardInterrupt):
+            cancellation_reason = "Operation interrupted by user (Ctrl-C)"
+        elif isinstance(e, SystemExit):
+            cancellation_reason = "Operation interrupted by system shutdown"
+        elif isinstance(e, asyncio.CancelledError):
+            cancellation_reason = "Operation cancelled (async task cancelled)"
+        else:
+            cancellation_reason = f"Operation cancelled: {str(e)}"
+        
+        if agent.run_response:
+            cancelled_response = create_run_response_cancelled_event(
+                from_run_response=agent.run_response,
+                reason=cancellation_reason
+            )
+        else:
+            # Create a minimal cancellation event if run_response is not available
+            from agno.run.response import RunResponseCancelledEvent
+            cancelled_response = RunResponseCancelledEvent(
+                session_id=session_id,
+                agent_id=agent.agent_id,
+                agent_name=agent.name,
+                run_id=str(uuid4()),
+                reason=cancellation_reason
+            )
+        yield cancelled_response.to_json()
+        return
     except Exception as e:
         import traceback
 
