@@ -316,23 +316,51 @@ def get_async_playground_router(
         base64_videos: List[Video] = []
         input_files: List[FileMedia] = []
 
+        # Helper class to wrap BytesIO for processing functions that expect UploadFile interface
+        class FileWrapper:
+            def __init__(self, contents: bytes, filename: str, content_type: str):
+                self.file = BytesIO(contents)
+                self.filename = filename
+                self.content_type = content_type
+
         if files:
             for file in files:
                 logger.info(f"Processing file: {file.content_type}")
+                
                 if file.content_type in ["image/png", "image/jpeg", "image/jpg", "image/webp"]:
                     try:
-                        base64_image = process_image(file)
+                        # Read contents first (UploadFile can only be read once)
+                        contents = await file.read()
+                        
+                        # Store in filestore if available (for agent tools to access later)
+                        if agent.filestore is not None:
+                            agent.filestore.add(contents, file.filename, file.content_type)
+                        
+                        # Process image for immediate use (create wrapper for processing function)
+                        file_wrapper = FileWrapper(contents, file.filename, file.content_type)
+                        base64_image = process_image(file_wrapper)
                         base64_images.append(base64_image)
                     except Exception as e:
                         logger.error(f"Error processing image {file.filename}: {e}")
                         continue
+                        
                 elif file.content_type in ["audio/wav", "audio/mp3", "audio/mpeg"]:
                     try:
-                        base64_audio = process_audio(file)
+                        # Read contents first (UploadFile can only be read once)
+                        contents = await file.read()
+                        
+                        # Store in filestore if available (for agent tools to access later)
+                        if agent.filestore is not None:
+                            agent.filestore.add(contents, file.filename, file.content_type)
+                        
+                        # Process audio for immediate use (create wrapper for processing function)
+                        file_wrapper = FileWrapper(contents, file.filename, file.content_type)
+                        base64_audio = process_audio(file_wrapper)
                         base64_audios.append(base64_audio)
                     except Exception as e:
                         logger.error(f"Error processing audio {file.filename}: {e}")
                         continue
+                        
                 elif file.content_type in [
                     "video/x-flv",
                     "video/quicktime",
@@ -347,92 +375,103 @@ def get_async_playground_router(
                     "video/3gpp",
                 ]:
                     try:
-                        base64_video = process_video(file)
+                        # Read contents first (UploadFile can only be read once)
+                        contents = await file.read()
+                        
+                        # Store in filestore if available (for agent tools to access later)
+                        if agent.filestore is not None:
+                            agent.filestore.add(contents, file.filename, file.content_type)
+                        
+                        # Process video for immediate use (create wrapper for processing function)
+                        file_wrapper = FileWrapper(contents, file.filename, file.content_type)
+                        base64_video = process_video(file_wrapper)
                         base64_videos.append(base64_video)
                     except Exception as e:
                         logger.error(f"Error processing video {file.filename}: {e}")
                         continue
+                        
                 else:
                     # Process document files
+                    # PRIORITY: Store in filestore FIRST if available (for agent tools)
+                    # Then optionally load into knowledge base or use as direct input
+                    
+                    # Read contents once (UploadFile can only be read once)
+                    contents = await file.read()
+                    
+                    # Store in filestore if available (allows agent tools to access files)
+                    stored_in_filestore = False
+                    if agent.filestore is not None:
+                        agent.filestore.add(contents, file.filename, file.content_type)
+                        stored_in_filestore = True
+                    
+                    # For specific document types, also load into knowledge base if available
+                    # (filestore and knowledge base are not mutually exclusive)
                     if file.content_type == "application/pdf":
-                        from agno.document.reader.pdf_reader import PDFReader
-
-                        contents = await file.read()
-
-                        # If agent has knowledge base, load the document into it
                         if agent.knowledge is not None:
+                            from agno.document.reader.pdf_reader import PDFReader
                             pdf_file = BytesIO(contents)
                             pdf_file.name = file.filename
                             file_content = PDFReader().read(pdf_file)
                             agent.knowledge.load_documents(file_content)
-                        else:
-                            # If no knowledge base, treat as direct file input (similar to cookbook examples)
+                        elif not stored_in_filestore:
+                            # If no knowledge base and no filestore, treat as direct file input
                             input_files.append(FileMedia(content=contents))
 
                     elif file.content_type == "text/csv":
-                        from agno.document.reader.csv_reader import CSVReader
-
-                        contents = await file.read()
-
-                        # If agent has knowledge base, load the document into it
                         if agent.knowledge is not None:
+                            from agno.document.reader.csv_reader import CSVReader
                             csv_file = BytesIO(contents)
                             csv_file.name = file.filename
                             file_content = CSVReader().read(csv_file)
                             agent.knowledge.load_documents(file_content)
-                        else:
-                            # If no knowledge base, treat as direct file input
+                        elif not stored_in_filestore:
+                            # If no knowledge base and no filestore, treat as direct file input
                             input_files.append(FileMedia(content=contents))
 
                     elif file.content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                        from agno.document.reader.docx_reader import DocxReader
-
-                        contents = await file.read()
-
-                        # If agent has knowledge base, load the document into it
                         if agent.knowledge is not None:
+                            from agno.document.reader.docx_reader import DocxReader
                             docx_file = BytesIO(contents)
                             docx_file.name = file.filename
                             file_content = DocxReader().read(docx_file)
                             agent.knowledge.load_documents(file_content)
-                        else:
-                            # If no knowledge base, treat as direct file input
+                        elif not stored_in_filestore:
+                            # If no knowledge base and no filestore, treat as direct file input
                             input_files.append(FileMedia(content=contents))
 
                     elif file.content_type == "text/plain":
-                        from agno.document.reader.text_reader import TextReader
-
-                        contents = await file.read()
-
-                        # If agent has knowledge base, load the document into it
                         if agent.knowledge is not None:
+                            from agno.document.reader.text_reader import TextReader
                             text_file = BytesIO(contents)
                             text_file.name = file.filename
                             file_content = TextReader().read(text_file)
                             agent.knowledge.load_documents(file_content)
-                        else:
-                            # If no knowledge base, treat as direct file input
+                        elif not stored_in_filestore:
+                            # If no knowledge base and no filestore, treat as direct file input
                             input_files.append(FileMedia(content=contents))
 
                     elif file.content_type == "application/json":
-                        from agno.document.reader.json_reader import JSONReader
-
-                        contents = await file.read()
-
-                        # If agent has knowledge base, load the document into it
                         if agent.knowledge is not None:
+                            from agno.document.reader.json_reader import JSONReader
                             json_file = BytesIO(contents)
                             json_file.name = file.filename
                             file_content = JSONReader().read(json_file)
                             agent.knowledge.load_documents(file_content)
-                        else:
-                            # If no knowledge base, treat as direct file input
+                        elif not stored_in_filestore:
+                            # If no knowledge base and no filestore, treat as direct file input
                             input_files.append(FileMedia(content=contents))
-                    elif agent.filestore is not None:
-                        contents = await file.read()
-                        agent.filestore.add(contents, file.filename, file.content_type)
-                    else:
-                        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+                    elif file.content_type == "message/rfc822":
+                        # EML email files - store in filestore for agent tools (e.g., phishing_email_check_agent)
+                        # EML files are typically processed by agent tools, not knowledge base
+                        if not stored_in_filestore:
+                            # If no filestore, treat as direct file input
+                            input_files.append(FileMedia(content=contents))
+                        # Note: EML files are already stored in filestore above if available
+                            
+                    elif not stored_in_filestore:
+                        # Unknown file type and no filestore - raise error
+                        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
 
         if stream:
             return StreamingResponse(
