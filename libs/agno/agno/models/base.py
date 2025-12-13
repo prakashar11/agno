@@ -1235,19 +1235,42 @@ class Model(ABC):
             if function_call.function.show_result:
                 yield ModelResponse(content=function_call_output)
 
+        # For tools with show_result=True, we've already yielded the result content
+        # So we create a minimal context message to avoid triggering agent summary generation
+        was_generator = isinstance(function_call.result, (GeneratorType, collections.abc.Iterator))
+        if function_call.function.show_result and len(function_call_output) > 500:
+            # Create minimal context for agent (full content already shown to user)
+            context_output = (
+                f"Tool '{function_call.function.name}' completed successfully. "
+                f"All results ({len(function_call_output)} characters) were already displayed to the user. "
+                f"DO NOT generate a summary or repeat the results - the user has already seen everything."
+            )
+        else:
+            context_output = function_call_output
+
         # Create and yield function call result
         function_call_result = self.create_function_call_result(
-            function_call, success=function_call_success, output=function_call_output, timer=function_call_timer
+            function_call, success=function_call_success, output=context_output, timer=function_call_timer
         )
+        
+        # For tools with show_result=True, we've already yielded the result content
+        # So we send a minimal final event (no result content) to avoid duplicate display
+        if function_call.function.show_result:
+            final_result = None  # No result needed - already displayed via yield above
+            final_content = ""  # Empty content to avoid showing duplicate
+        else:
+            final_result = str(function_call_result.content)
+            final_content = f"{function_call.get_call_str()} completed in {function_call_timer.elapsed:.4f}s."
+        
         yield ModelResponse(
-            content=f"{function_call.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
+            content=final_content,
             tool_executions=[
                 ToolExecution(
                     tool_call_id=function_call_result.tool_call_id,
                     tool_name=function_call_result.tool_name,
                     tool_args=function_call_result.tool_args,
                     tool_call_error=function_call_result.tool_call_error,
-                    result=str(function_call_result.content),
+                    result=final_result,
                     stop_after_tool_call=function_call_result.stop_after_tool_call,
                     metrics=function_call_result.metrics,
                 )
@@ -1623,15 +1646,15 @@ class Model(ABC):
                 if fc.function.show_result:
                     yield ModelResponse(content=function_call_output)
 
-            # For generator tools with show_result=True, we've already streamed incremental results
+            # For tools with show_result=True, we've already yielded the result content above
             # So we create a minimal context message (no summary) to avoid triggering agent summary generation
             was_generator = isinstance(fc.result, (AsyncGeneratorType, collections.abc.AsyncIterator))
-            if was_generator and fc.function.show_result and len(function_call_output) > 500:
-                # Create minimal context for agent (full content already streamed to agent-ui)
+            if fc.function.show_result and len(function_call_output) > 500:
+                # Create minimal context for agent (full content already streamed/shown to agent-ui)
                 # Explicitly instruct agent NOT to summarize - user has already seen all results
                 context_output = (
                     f"Tool '{fc.function.name}' completed successfully. "
-                    f"All results ({len(function_call_output)} characters) were already streamed and displayed to the user. "
+                    f"All results ({len(function_call_output)} characters) were already displayed to the user. "
                     f"DO NOT generate a summary or repeat the results - the user has already seen everything."
                 )
             else:
@@ -1642,12 +1665,12 @@ class Model(ABC):
                 fc, success=function_call_success, output=context_output, timer=function_call_timer
             )
             
-            # For generator tools with show_result=True, we've already streamed all incremental results
-            # So we send a minimal final event (no result content) to avoid duplicate summary
-            if was_generator and fc.function.show_result:
-                # Send minimal completion event without result (all content already streamed incrementally)
-                final_result = None  # No result needed - already streamed
-                final_content = ""  # Empty content to avoid showing summary
+            # For tools with show_result=True, we've already yielded/streamed the result content
+            # So we send a minimal final event (no result content) to avoid duplicate display
+            if fc.function.show_result:
+                # Send minimal completion event without result (content already shown)
+                final_result = None  # No result needed - already displayed via yield above
+                final_content = ""  # Empty content to avoid showing duplicate
             else:
                 final_result = str(function_call_result.content)
                 final_content = f"{fc.get_call_str()} completed in {function_call_timer.elapsed:.4f}s."
