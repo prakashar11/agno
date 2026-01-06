@@ -172,6 +172,7 @@ class Playground:
         port: int = 7777,
         reload: bool = False,
         prefix="/v1",
+        workers: Optional[int] = None,
         **kwargs,
     ):
         import uvicorn
@@ -207,7 +208,22 @@ class Playground:
         if self.workflows:
             for workflow in self.workflows:
                 workflow.register_workflow()
-        uvicorn.run(app=app, host=host, port=port, reload=reload, **kwargs)
+        
+        # Configure workers for concurrent request handling
+        # Note: workers > 1 is incompatible with reload=True
+        run_config = {
+            "app": app,
+            "host": host,
+            "port": port,
+            "reload": reload,
+            **kwargs
+        }
+        
+        # Only add workers if reload is disabled (workers and reload are mutually exclusive)
+        if workers and not reload:
+            run_config["workers"] = workers
+        
+        uvicorn.run(**run_config)
 
     def register_app_on_platform(self) -> None:
         self._set_monitoring()

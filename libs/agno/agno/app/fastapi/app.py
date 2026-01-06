@@ -95,6 +95,7 @@ class FastAPIApp(BaseAPIApp):
         host: str = "localhost",
         port: int = 7777,
         reload: bool = False,
+        workers: Optional[int] = None,
         **kwargs,
     ):
         self.set_app_id()
@@ -113,4 +114,18 @@ class FastAPIApp(BaseAPIApp):
                 workflow.register_workflow()
         log_info(f"Starting API on {host}:{port}")
 
-        uvicorn.run(app=app, host=host, port=port, reload=reload, **kwargs)
+        # Configure workers for concurrent request handling
+        # Note: workers > 1 is incompatible with reload=True
+        run_config = {
+            "app": app,
+            "host": host,
+            "port": port,
+            "reload": reload,
+            **kwargs
+        }
+        
+        # Only add workers if reload is disabled (workers and reload are mutually exclusive)
+        if workers and not reload:
+            run_config["workers"] = workers
+        
+        uvicorn.run(**run_config)

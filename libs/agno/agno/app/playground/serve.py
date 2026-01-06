@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional, Union
 from urllib.parse import quote
 
 from fastapi import FastAPI
@@ -19,6 +19,7 @@ def serve_playground_app(
     port: int = 7777,
     reload: bool = False,
     prefix="/v1",
+    workers: Optional[int] = None,
     **kwargs,
 ):
     import uvicorn
@@ -61,4 +62,18 @@ def serve_playground_app(
     # Print the panel
     console.print(panel)
 
-    uvicorn.run(app=app, host=host, port=port, reload=reload, **kwargs)
+    # Configure workers for concurrent request handling
+    # Note: workers > 1 is incompatible with reload=True
+    run_config = {
+        "app": app,
+        "host": host,
+        "port": port,
+        "reload": reload,
+        **kwargs
+    }
+    
+    # Only add workers if reload is disabled (workers and reload are mutually exclusive)
+    if workers and not reload:
+        run_config["workers"] = workers
+    
+    uvicorn.run(**run_config)
