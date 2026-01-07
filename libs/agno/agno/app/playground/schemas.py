@@ -87,7 +87,7 @@ class AgentRunRequest(BaseModel):
 
 class AgentRenameRequest(BaseModel):
     name: str
-    user_id: str
+    user_id: Optional[str] = None
 
 
 class AgentSessionsResponse(BaseModel):
@@ -220,4 +220,4 @@ class TeamSessionResponse(BaseModel):
 
 class TeamRenameRequest(BaseModel):
     name: str
-    user_id: str
+    user_id: Optional[str] = None
