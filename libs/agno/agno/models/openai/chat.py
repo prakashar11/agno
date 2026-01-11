@@ -15,13 +15,14 @@ from agno.utils.log import log_debug, log_error, log_warning
 from agno.utils.openai import _format_file_for_message, audio_to_message, images_to_message
 
 try:
-    from openai import APIConnectionError, APIStatusError, RateLimitError
+    from openai import APIConnectionError, APIError, APIStatusError, RateLimitError
     from openai import AsyncOpenAI as AsyncOpenAIClient
     from openai import OpenAI as OpenAIClient
     from openai.types.chat import ChatCompletionAudio
     from openai.types.chat.chat_completion import ChatCompletion
     from openai.types.chat.chat_completion_chunk import (
         ChatCompletionChunk,
+        Choice,
         ChoiceDelta,
         ChoiceDeltaToolCall,
     )
@@ -448,13 +449,55 @@ class OpenAIChat(Model):
         """
 
         try:
-            yield from self.get_client().chat.completions.create(
+            stream = self.get_client().chat.completions.create(
                 model=self.id,
                 messages=[self._format_message(m) for m in messages],  # type: ignore
                 stream=True,
                 stream_options={"include_usage": True},
                 **self.get_request_params(response_format=response_format, tools=tools, tool_choice=tool_choice),
-            )  # type: ignore
+            )
+            for chunk in stream:
+                yield chunk
+        except APIError as e:
+            # Handle llama.cpp tool call streaming compatibility issue
+            # The error "Invalid diff: now finding less tool calls!" occurs when
+            # llama.cpp's streaming format doesn't match OpenAI SDK expectations
+            if "tool calls" in str(e).lower() or "invalid diff" in str(e).lower():
+                log_warning(f"Tool call streaming error (llama.cpp compatibility), falling back to non-streaming: {e}")
+                # Fall back to non-streaming request
+                try:
+                    response = self.get_client().chat.completions.create(
+                        model=self.id,
+                        messages=[self._format_message(m) for m in messages],  # type: ignore
+                        stream=False,
+                        **self.get_request_params(response_format=response_format, tools=tools, tool_choice=tool_choice),
+                    )
+                    # Create a final chunk from the non-streaming response
+                    if response.choices and len(response.choices) > 0:
+                        choice = response.choices[0]
+                        yield ChatCompletionChunk(
+                            id=response.id,
+                            choices=[
+                                Choice(
+                                    index=0,
+                                    delta=ChoiceDelta(
+                                        content=choice.message.content,
+                                        role=choice.message.role,
+                                        tool_calls=choice.message.tool_calls,
+                                    ),
+                                    finish_reason=choice.finish_reason,
+                                )
+                            ],
+                            created=response.created,
+                            model=response.model,
+                            object="chat.completion.chunk",
+                        )
+                except Exception as fallback_error:
+                    log_error(f"Fallback non-streaming request also failed: {fallback_error}")
+                    raise ModelProviderError(message=str(e), model_name=self.name, model_id=self.id) from e
+            else:
+                log_error(f"API error from OpenAI API: {e}")
+                raise ModelProviderError(message=str(e), model_name=self.name, model_id=self.id) from e
         except RateLimitError as e:
             log_error(f"Rate limit error from OpenAI API: {e}")
             error_message = e.response.json().get("error", {})
@@ -520,6 +563,46 @@ class OpenAIChat(Model):
             )
             async for chunk in async_stream:
                 yield chunk
+        except APIError as e:
+            # Handle llama.cpp tool call streaming compatibility issue
+            # The error "Invalid diff: now finding less tool calls!" occurs when
+            # llama.cpp's streaming format doesn't match OpenAI SDK expectations
+            if "tool calls" in str(e).lower() or "invalid diff" in str(e).lower():
+                log_warning(f"Tool call streaming error (llama.cpp compatibility), falling back to non-streaming: {e}")
+                # Fall back to non-streaming request
+                try:
+                    response = await self.get_async_client().chat.completions.create(
+                        model=self.id,
+                        messages=[self._format_message(m) for m in messages],  # type: ignore
+                        stream=False,
+                        **self.get_request_params(response_format=response_format, tools=tools, tool_choice=tool_choice),
+                    )
+                    # Create a final chunk from the non-streaming response
+                    if response.choices and len(response.choices) > 0:
+                        choice = response.choices[0]
+                        yield ChatCompletionChunk(
+                            id=response.id,
+                            choices=[
+                                Choice(
+                                    index=0,
+                                    delta=ChoiceDelta(
+                                        content=choice.message.content,
+                                        role=choice.message.role,
+                                        tool_calls=choice.message.tool_calls,
+                                    ),
+                                    finish_reason=choice.finish_reason,
+                                )
+                            ],
+                            created=response.created,
+                            model=response.model,
+                            object="chat.completion.chunk",
+                        )
+                except Exception as fallback_error:
+                    log_error(f"Fallback non-streaming request also failed: {fallback_error}")
+                    raise ModelProviderError(message=str(e), model_name=self.name, model_id=self.id) from e
+            else:
+                log_error(f"API error from OpenAI API: {e}")
+                raise ModelProviderError(message=str(e), model_name=self.name, model_id=self.id) from e
         except RateLimitError as e:
             log_error(f"Rate limit error from OpenAI API: {e}")
             error_message = e.response.json().get("error", {})
