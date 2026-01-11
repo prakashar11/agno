@@ -1143,6 +1143,13 @@ class Model(ABC):
         kwargs = {}
         if timer is not None:
             kwargs["metrics"] = MessageMetrics(time=timer.elapsed)
+
+        # Determine if we should stop after this tool call
+        # Priority: 1) Function-level setting, 2) Model-level force setting
+        should_stop = function_call.function.stop_after_tool_call
+        if not should_stop and hasattr(self, "force_stop_after_tool_call"):
+            should_stop = getattr(self, "force_stop_after_tool_call", False)
+
         return Message(
             role=self.tool_message_role,
             content=output if success else function_call.error,
@@ -1150,7 +1157,7 @@ class Model(ABC):
             tool_name=function_call.function.name,
             tool_args=function_call.arguments,
             tool_call_error=not success,
-            stop_after_tool_call=function_call.function.stop_after_tool_call,
+            stop_after_tool_call=should_stop,
             **kwargs,
         )
 

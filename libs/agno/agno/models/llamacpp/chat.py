@@ -206,6 +206,12 @@ class LlamaCpp(OpenAILike):
     cache_prompt: Optional[bool] = None  # Enable prompt caching
     slot_id: Optional[int] = None  # Target specific slot for session affinity
 
+    # Tool calling behavior
+    # Unlike Ollama which has native tool termination, llama.cpp via OpenAI API
+    # may continue generating after tool calls. Set this to True to force stop
+    # after every tool call (equivalent to @tool(stop_after_tool_call=True) for all tools)
+    force_stop_after_tool_call: bool = False
+
     # Sampling parameters (can also be set on parent class)
     # These override parent class defaults for llama.cpp optimization
     temperature: Optional[float] = None
@@ -290,10 +296,23 @@ class LlamaCpp(OpenAILike):
                 "slot_id": self.slot_id,
                 "top_k": self.top_k,
                 "repeat_penalty": self.repeat_penalty,
+                "force_stop_after_tool_call": self.force_stop_after_tool_call,
             }
         )
         # Remove None values
         return {k: v for k, v in model_dict.items() if v is not None}
+
+    def should_stop_after_tool_call(self) -> bool:
+        """
+        Check if the model should force stop after every tool call.
+
+        This is useful for llama.cpp which may not properly terminate after tool calls
+        like Ollama does with native tool calling support.
+
+        Returns:
+            bool: True if should force stop after every tool call
+        """
+        return self.force_stop_after_tool_call
 
     # =========================================================================
     # OLLAMA-COMPATIBLE INVOKE METHODS
