@@ -53,8 +53,8 @@ Multi-model routing:
     llm_analysis = LlamaCpp(id="gpt-oss-20b", base_url="http://localhost:8080/v1")
 """
 
+import os
 from dataclasses import dataclass, field
-from os import getenv
 from typing import Any, AsyncIterator, Dict, Iterator, List, Mapping, Optional, Type, Union
 
 from pydantic import BaseModel
@@ -194,8 +194,8 @@ class LlamaCpp(OpenAILike):
     provider: str = "LlamaCpp"
 
     # Server configuration
-    base_url: str = getenv("LLAMACPP_BASE_URL", "http://localhost:8080/v1")
-    api_key: Optional[str] = getenv("LLAMACPP_API_KEY", "not-required")
+    base_url: str = os.getenv("LLAMACPP_BASE_URL", "http://localhost:8080/v1")
+    api_key: Optional[str] = os.getenv("LLAMACPP_API_KEY", "not-required")
 
     # llama.cpp doesn't support native structured outputs like OpenAI
     # but it does support JSON schema via grammar constraints
@@ -333,6 +333,7 @@ class LlamaCpp(OpenAILike):
             tools=tools,
             tool_choice=tool_choice,
         )
+
         # Wrap in Ollama-compatible format
         return OllamaCompatibleResponse(openai_response)
 
@@ -366,6 +367,7 @@ class LlamaCpp(OpenAILike):
             tools=tools,
             tool_choice=tool_choice,
         )
+
         # Wrap in Ollama-compatible format
         return OllamaCompatibleResponse(openai_response)
 
