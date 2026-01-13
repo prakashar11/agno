@@ -50,6 +50,8 @@ def get_session_title(session: Union[AgentSession, TeamSession]) -> str:
     if memory is not None:
         # Proxy for knowing it is legacy memory implementation
         runs = memory.get("runs")
+        if runs is None:
+            return "Unnamed session"
         runs = cast(List[Any], runs)
 
         for _run in runs:
@@ -95,6 +97,8 @@ def get_session_title_from_workflow_session(workflow_session: WorkflowSession) -
     memory = workflow_session.memory
     if memory is not None:
         runs = memory.get("runs")
+        if runs is None:
+            return "Unnamed session"
         runs = cast(List[Any], runs)
         for _run in runs:
             try:
@@ -148,6 +152,8 @@ def get_session_title_from_team_session(team_session: TeamSession) -> str:
     memory = team_session.memory
     if memory is not None:
         runs = memory.get("runs")
+        if runs is None:
+            return "Unnamed session"
         runs = cast(List[Any], runs)
 
         for _run in runs:

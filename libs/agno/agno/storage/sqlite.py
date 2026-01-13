@@ -59,7 +59,8 @@ class SqliteStorage(Storage):
             # Ensure the directory exists
             db_path.parent.mkdir(parents=True, exist_ok=True)
             _engine = create_engine(f"sqlite:///{db_path}")
-        else:
+        elif _engine is None:
+            # Fallback to in-memory database only if no other option provided
             _engine = create_engine("sqlite://")
 
         if _engine is None:
@@ -71,16 +72,18 @@ class SqliteStorage(Storage):
         self.db_engine: Engine = _engine
 
         # Set SQLite pragmas for better concurrency and reliability
-        # Critical for multi-worker environments (Gunicorn) and long-running operations
-        from sqlalchemy import event
+        # Only add event listener if we created the engine ourselves (not passed in)
+        # This avoids duplicate listeners when db_engine is provided from db_manager
+        if db_engine is None:
+            from sqlalchemy import event
 
-        @event.listens_for(self.db_engine, "connect")
-        def set_sqlite_pragma(dbapi_connection, connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for concurrent access
-            cursor.execute("PRAGMA synchronous=NORMAL")  # Faster, still safe
-            cursor.execute("PRAGMA busy_timeout=30000")  # 30s timeout for locks
-            cursor.close()
+            @event.listens_for(self.db_engine, "connect")
+            def set_sqlite_pragma(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")  # Write-Ahead Logging for concurrent access
+                cursor.execute("PRAGMA synchronous=NORMAL")  # Faster, still safe
+                cursor.execute("PRAGMA busy_timeout=30000")  # 30s timeout for locks
+                cursor.close()
 
         self.metadata: MetaData = MetaData()
         self.inspector = inspect(self.db_engine)
