@@ -205,6 +205,11 @@ class LlamaCpp(OpenAILike):
     # llama.cpp specific options (sent in extra_body)
     cache_prompt: Optional[bool] = None  # Enable prompt caching
     slot_id: Optional[int] = None  # Target specific slot for session affinity
+    
+    # Chat template kwargs for reasoning models (gpt-oss)
+    # See: https://github.com/ggml-org/llama.cpp/issues/15130
+    # Options: {"reasoning_effort": "none" | "low" | "medium" | "high"}
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
     # Tool calling behavior
     # Unlike Ollama which has native tool termination, llama.cpp via OpenAI API
@@ -273,6 +278,11 @@ class LlamaCpp(OpenAILike):
         # Add repeat_penalty if specified
         if self.repeat_penalty is not None:
             extra_body["repeat_penalty"] = self.repeat_penalty
+
+        # Add chat_template_kwargs for reasoning control (gpt-oss models)
+        # See: https://github.com/ggml-org/llama.cpp/issues/15130
+        if self.chat_template_kwargs is not None:
+            extra_body["chat_template_kwargs"] = self.chat_template_kwargs
 
         # Only add extra_body if we have llama.cpp-specific options
         if extra_body:

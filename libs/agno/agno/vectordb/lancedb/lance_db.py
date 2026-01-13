@@ -1,4 +1,5 @@
 import json
+import re
 from hashlib import md5
 from typing import Any, Dict, List, Optional
 
@@ -7,6 +8,30 @@ try:
     import pyarrow as pa
 except ImportError:
     raise ImportError("`lancedb` not installed. Please install using `pip install lancedb`")
+
+
+# Tantivy/Lucene special characters that need escaping
+# Reference: https://docs.rs/tantivy/latest/tantivy/query/struct.QueryParser.html
+TANTIVY_SPECIAL_CHARS = re.compile(r'([+\-&|!(){}\[\]^"~*?:\\/])')
+
+
+def escape_tantivy_query(query: str) -> str:
+    """
+    Escape special characters for Tantivy FTS query.
+    
+    Tantivy uses a Lucene-like query syntax where these characters have special meaning:
+    + - && || ! ( ) { } [ ] ^ " ~ * ? : \\ /
+    
+    Args:
+        query: Raw query string
+        
+    Returns:
+        Escaped query string safe for Tantivy FTS
+    """
+    if not query:
+        return query
+    # Escape special characters with backslash
+    return TANTIVY_SPECIAL_CHARS.sub(r'\\\1', query)
 
 from agno.document import Document
 from agno.embedder import Embedder
@@ -487,13 +512,16 @@ class LanceDb(VectorDb):
             self.table.create_fts_index("payload", use_tantivy=self.use_tantivy, replace=True)
             self.fts_index_exists = True
 
+        # Escape special Tantivy characters in the text query to prevent syntax errors
+        escaped_query = escape_tantivy_query(query)
+
         results = (
             self.table.search(
                 vector_column_name=self._vector_col,
                 query_type="hybrid",
             )
             .vector(query_embedding)
-            .text(query)
+            .text(escaped_query)
             .limit(limit)
         )
 
@@ -511,8 +539,11 @@ class LanceDb(VectorDb):
             self.table.create_fts_index("payload", use_tantivy=self.use_tantivy, replace=True)
             self.fts_index_exists = True
 
+        # Escape special Tantivy characters in the query to prevent syntax errors
+        escaped_query = escape_tantivy_query(query)
+
         results = self.table.search(
-            query=query,
+            query=escaped_query,
             query_type="fts",
         ).limit(limit)
 
