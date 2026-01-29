@@ -9,23 +9,29 @@ from agno.tools.function import Function
 from agno.utils.log import log_debug, log_warning, logger
 from agno.utils.mcp import get_entrypoint_for_tool
 
-# OpenAI API rejects some JSON Schema "format" values in tool parameters; strip them at registration.
-_OPENAI_UNSUPPORTED_SCHEMA_FORMATS = frozenset({"ipv4", "ipv6", "string"})
+# Format values that strict backends (e.g. Qwen 2.5, OpenAI) reject; we convert them to description hints.
+_UNSUPPORTED_SCHEMA_FORMATS = frozenset({"ipv4", "ipv6", "string"})
+_FORMAT_TO_DESCRIPTION_HINT: Dict[str, str] = {
+    "ipv4": "Must be a valid IPv4 address",
+    "ipv6": "Must be a valid IPv6 address",
+    "string": "String value",
+}
 
 
 def _sanitize_schema_for_openai(
     schema: Optional[Dict[str, Any]], name: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Recursively remove unsupported 'format' values from JSON Schema so OpenAI API accepts tool definitions.
-    name: optional tool name for log messages when a faulty schema is sanitized."""
+    """Recursively convert unsupported 'format' values into description hints so Qwen 2.5 / OpenAI accept tool definitions."""
     if not schema or not isinstance(schema, dict):
         return schema or {}
     out: Dict[str, Any] = {}
+    format_hint: Optional[str] = None
     for k, v in schema.items():
-        if k == "format" and isinstance(v, str) and v in _OPENAI_UNSUPPORTED_SCHEMA_FORMATS:
-            logger.warning(
-                "Removing unsupported schema format '%s' from tool '%s'", v, name or "unknown"
-            )
+        if k == "format" and isinstance(v, str) and v in _UNSUPPORTED_SCHEMA_FORMATS:
+            format_hint = _FORMAT_TO_DESCRIPTION_HINT.get(v, "String value")
+            continue
+        if k == "description":
+            out["description"] = v
             continue
         if isinstance(v, dict):
             out[k] = _sanitize_schema_for_openai(v, name)
@@ -33,6 +39,15 @@ def _sanitize_schema_for_openai(
             out[k] = [_sanitize_schema_for_openai(x, name) if isinstance(x, dict) else x for x in v]
         else:
             out[k] = v
+    if format_hint is not None:
+        existing = out.get("description", "")
+        if isinstance(existing, str) and existing.strip():
+            out["description"] = f"{existing.strip()}\n{format_hint}"
+        else:
+            out["description"] = format_hint
+        # Qwen 2.5 / OpenAI-compatible APIs require "type"; schema with only "description" is rejected.
+        if "type" not in out:
+            out["type"] = "string"
     return out
 
 
