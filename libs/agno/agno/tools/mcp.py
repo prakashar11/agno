@@ -2,12 +2,39 @@ from contextlib import AsyncExitStack
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Callable, Dict, List, Literal, Optional, Union
 
 from agno.tools import Toolkit
 from agno.tools.function import Function
 from agno.utils.log import log_debug, log_warning, logger
 from agno.utils.mcp import get_entrypoint_for_tool
+
+# OpenAI API rejects some JSON Schema "format" values in tool parameters; strip them at registration.
+_OPENAI_UNSUPPORTED_SCHEMA_FORMATS = frozenset({"ipv4", "ipv6", "string"})
+
+
+def _sanitize_schema_for_openai(
+    schema: Optional[Dict[str, Any]], name: Optional[str] = None
+) -> Dict[str, Any]:
+    """Recursively remove unsupported 'format' values from JSON Schema so OpenAI API accepts tool definitions.
+    name: optional tool name for log messages when a faulty schema is sanitized."""
+    if not schema or not isinstance(schema, dict):
+        return schema or {}
+    out: Dict[str, Any] = {}
+    for k, v in schema.items():
+        if k == "format" and isinstance(v, str) and v in _OPENAI_UNSUPPORTED_SCHEMA_FORMATS:
+            logger.warning(
+                "Removing unsupported schema format '%s' from tool '%s'", v, name or "unknown"
+            )
+            continue
+        if isinstance(v, dict):
+            out[k] = _sanitize_schema_for_openai(v, name)
+        elif isinstance(v, list):
+            out[k] = [_sanitize_schema_for_openai(x, name) if isinstance(x, dict) else x for x in v]
+        else:
+            out[k] = v
+    return out
+
 
 try:
     from mcp import ClientSession, StdioServerParameters
@@ -63,6 +90,9 @@ class MCPTools(Toolkit):
         client=None,
         include_tools: Optional[list[str]] = None,
         exclude_tools: Optional[list[str]] = None,
+        show_result: bool = True,
+        stop_after_tool_call: bool = True,
+        format_result: Optional[Callable[[str], str]] = None,
         **kwargs,
     ):
         """
@@ -78,6 +108,9 @@ class MCPTools(Toolkit):
             timeout_seconds: Read timeout in seconds for the MCP client
             include_tools: Optional list of tool names to include (if None, includes all)
             exclude_tools: Optional list of tool names to exclude (if None, excludes none)
+            show_result: If True, show MCP tool result to the user (default True).
+            stop_after_tool_call: If True, agent stops after each MCP tool call (default True).
+            format_result: Optional callable(result_str) -> str to format MCP tool output (e.g. agent-specific markdown).
             transport: The transport protocol to use, either "stdio" or "sse" or "streamable-http"
         """
         super().__init__(name="MCPTools", **kwargs)
@@ -86,6 +119,9 @@ class MCPTools(Toolkit):
         # because tools are not available until `initialize()` is called.
         self.include_tools = include_tools
         self.exclude_tools = exclude_tools
+        self.show_result = show_result
+        self.stop_after_tool_call = stop_after_tool_call
+        self.format_result = format_result
 
         if session is None and server_params is None:
             if transport == "sse" and url is None:
@@ -236,15 +272,21 @@ class MCPTools(Toolkit):
             for tool in filtered_tools:
                 try:
                     # Get an entrypoint for the tool
-                    entrypoint = get_entrypoint_for_tool(tool, self.session)
+                    entrypoint = get_entrypoint_for_tool(
+                        tool,
+                        self.session,
+                        format_result=getattr(self, "format_result", None),
+                    )
                     # Create a Function for the tool
                     f = Function(
                         name=tool.name,
                         description=tool.description,
-                        parameters=tool.inputSchema,
+                        parameters=_sanitize_schema_for_openai(tool.inputSchema, tool.name),
                         entrypoint=entrypoint,
                         # Set skip_entrypoint_processing to True to avoid processing the entrypoint
                         skip_entrypoint_processing=True,
+                        show_result=getattr(self, "show_result", True),
+                        stop_after_tool_call=getattr(self, "stop_after_tool_call", True),
                     )
 
                     # Register the Function with the toolkit
@@ -285,6 +327,9 @@ class MultiMCPTools(Toolkit):
         client=None,
         include_tools: Optional[list[str]] = None,
         exclude_tools: Optional[list[str]] = None,
+        show_result: bool = True,
+        stop_after_tool_call: bool = True,
+        format_result: Optional[Callable[[str], str]] = None,
         **kwargs,
     ):
         """
@@ -300,9 +345,15 @@ class MultiMCPTools(Toolkit):
             timeout_seconds: Timeout in seconds for managing timeouts for Client Session if Agent or Tool doesn't respond.
             include_tools: Optional list of tool names to include (if None, includes all).
             exclude_tools: Optional list of tool names to exclude (if None, excludes none).
+            show_result: If True, show MCP tool result to the user (default True).
+            stop_after_tool_call: If True, agent stops after each MCP tool call (default True).
+            format_result: Optional callable(result_str) -> str to format MCP tool output (e.g. agent-specific markdown).
         """
         super().__init__(name="MultiMCPTools", **kwargs)
 
+        self.show_result = show_result
+        self.stop_after_tool_call = stop_after_tool_call
+        self.format_result = format_result
         if urls is not None:
             if urls_transports is None:
                 log_warning(
@@ -364,7 +415,7 @@ class MultiMCPTools(Toolkit):
     async def __aenter__(self) -> "MultiMCPTools":
         """Enter the async context manager."""
 
-        for server_params in self.server_params_list:
+        for idx, server_params in enumerate(self.server_params_list):
             # Handle stdio connections
             if isinstance(server_params, StdioServerParameters):
                 stdio_transport = await self._async_exit_stack.enter_async_context(stdio_client(server_params))
@@ -424,16 +475,22 @@ class MultiMCPTools(Toolkit):
             for tool in filtered_tools:
                 try:
                     # Get an entrypoint for the tool
-                    entrypoint = get_entrypoint_for_tool(tool, session)
+                    entrypoint = get_entrypoint_for_tool(
+                        tool,
+                        session,
+                        format_result=getattr(self, "format_result", None),
+                    )
 
                     # Create a Function for the tool
                     f = Function(
                         name=tool.name,
                         description=tool.description,
-                        parameters=tool.inputSchema,
+                        parameters=_sanitize_schema_for_openai(tool.inputSchema, tool.name),
                         entrypoint=entrypoint,
                         # Set skip_entrypoint_processing to True to avoid processing the entrypoint
                         skip_entrypoint_processing=True,
+                        show_result=getattr(self, "show_result", True),
+                        stop_after_tool_call=getattr(self, "stop_after_tool_call", True),
                     )
 
                     # Register the Function with the toolkit
