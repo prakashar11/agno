@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 from io import BytesIO
 from typing import Any, AsyncGenerator, Dict, List, Optional, cast
 from uuid import uuid4
@@ -303,21 +302,6 @@ def get_async_playground_router(
 
         if session_id is not None and session_id != "":
             logger.debug(f"Continuing session: {session_id}")
-            # Ensure session exists so GET /agents/{agent_id}/sessions/{session_id} does not 404 when agent-ui loads session (e.g. before run has written).
-            if agent.storage is not None:
-                existing = agent.storage.read(session_id=session_id, user_id=user_id)
-                if existing is None:
-                    empty_session = AgentSession(
-                        session_id=session_id,
-                        agent_id=agent_id,
-                        user_id=user_id,
-                        memory=None,
-                        session_data=None,
-                        agent_data=None,
-                        created_at=int(time.time()),
-                        updated_at=int(time.time()),
-                    )
-                    agent.storage.upsert(empty_session)
         else:
             logger.debug("Creating new session")
             session_id = str(uuid4())
